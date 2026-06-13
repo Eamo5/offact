@@ -5,10 +5,12 @@ on:
     paths-ignore:
       - "**/*.md"
       - '**/*.txt'
+      - 'tools/__pycache__/**'
   pull_request:
     paths-ignore:
       - "**/*.md"
       - '**/*.txt'
+      - 'tools/__pycache__/**'
   workflow_dispatch:
 
 concurrency:
@@ -20,27 +22,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install build-essential clang-18 lld-18
+          sudo apt install build-essential clang-18 lld-18 python3 zip
 
       - name: Install toolchain
         run: |
           wget https://github.com/ps5-payload-dev/pacbrew-repo/releases/latest/download/ps5-payload-dev.tar.gz
           sudo tar xf ps5-payload-dev.tar.gz -C /
 
-      - name: Build
+      - name: Generate embedded WebUI asset
+        run: |
+          python3 tools/gen_assets.py frontend/index.html include/assets_index_html.h index_html
+
+      - name: Verify generated asset is current
+        run: |
+          git diff --exit-code -- include/assets_index_html.h
+
+      - name: Build daemon ELF
+        run: |
+          PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk make clean all
+
+      - name: Package distribution
         run: |
           PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk make dist
 
-      - name: Upload Payload
+      - name: Upload distribution zip
         uses: actions/upload-artifact@v4
         with:
-          name: OffAct
+          name: OffAct-dist
           path: OffAct.zip
+          if-no-files-found: error
+
+      - name: Upload daemon ELF
+        uses: actions/upload-artifact@v4
+        with:
+          name: OffAct-elf
+          path: OffAct.elf
           if-no-files-found: error
 
   release:
@@ -54,7 +75,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: OffAct
+          name: OffAct-dist
           path: .
 
       - name: Create GitHub Release (pre-release)

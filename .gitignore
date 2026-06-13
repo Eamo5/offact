@@ -5,3 +5,5 @@ snd_nav.h
 font.h
 readme.h
 OffAct.zip
+__pycache__/
+*.py[cod]
