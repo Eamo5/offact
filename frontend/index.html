@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OffAct</title>
+  <style>
+    body{margin:0;background:#10131a;color:#eef2ff;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+    main{max-width:980px;margin:0 auto;padding:28px}.card{background:#181d29;border:1px solid #2c3447;border-radius:14px;padding:18px;margin:16px 0}
+    .acct{display:block;width:100%;text-align:left;background:#111722;color:#eef2ff;border:1px solid #33405a;border-radius:10px;padding:14px;margin:10px 0}
+    .acct.selected{border-color:#61dafb;box-shadow:0 0 0 2px #61dafb33}.warn{border-color:#f5b84b;background:#2a2114}
+    button{background:#3584e4;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:700}button:disabled{opacity:.45}.danger{background:#c64646}
+    .muted{color:#a8b3c7}code{color:#b7f7d0}label{display:block;margin:14px 0}
+    input[type=text]{background:#0d111a;color:#eef2ff;border:1px solid #33405a;border-radius:6px;padding:8px;min-width:270px}
+  </style>
+</head>
+<body><main>
+  <h1>OffAct</h1>
+  <p class="muted">Local PS5 account activation dashboard.</p>
+  <div class="card">
+    <button id="refresh">Refresh accounts</button>
+    <button id="diagnostics">Show diagnostics</button>
+    <button id="deepdiff">Diff User1 → User2</button>
+    <button id="open">Open browser</button>
+    <button id="install">Install launcher</button>
+    <button id="shutdown" class="danger">Shutdown daemon</button>
+    <p id="status" class="muted"></p>
+  </div>
+  <div class="card warn"><strong>Save data warning:</strong> Activating an account changes registry values for the selected slot. Select the account yourself and confirm the exact displayed name. OffAct will revalidate the selected account before writing and will not bulk patch accounts.</div>
+  <section id="accounts" class="card">Loading accounts...</section>
+  <div class="card">
+    <label>Account ID to apply: <input id="accountId" type="text" autocomplete="off"></label>
+    <p class="muted">Defaults to the existing account ID when present, otherwise the generated ID for the selected account name.</p>
+    <label><input id="risk" type="checkbox"> I understand the save data risk and want to activate only the selected account shown above.</label>
+    <button id="activate" class="danger" disabled>Activate selected account</button>
+  </div>
+  <pre id="result" class="card"></pre>
+</main><script>
+let accounts = [], selected = null;
+const $ = id => document.getElementById(id);
+function msg(t){ $('status').textContent = t; }
+function zeroId(v){ return !v || /^0+$/.test(v); }
+function normalizeId(v){ return (v || '').trim().replace(/^0x/i, ''); }
+function defaultAccountId(a){ return zeroId(a.accountId) ? a.generatedAccountId : a.accountId; }
+function validId(v){ return /^[0-9a-fA-F]{1,16}$/.test(normalizeId(v)); }
+function update(){
+  $('activate').disabled = !(selected && $('risk').checked && validId($('accountId').value));
+}
+function render(){
+  const root = $('accounts');
+  if(!accounts.length){ root.textContent = 'No populated account slots found.'; return; }
+  root.innerHTML = '<h2>Accounts</h2>';
+  accounts.forEach(a => {
+    const b = document.createElement('button');
+    b.className = 'acct' + (selected && selected.slot === a.slot ? ' selected' : '');
+    const title = document.createElement('strong');
+    title.textContent = `Slot ${a.slot}: ${a.name}`;
+    const details = document.createElement('span');
+    details.className = 'muted';
+    details.textContent = `accountId ${a.accountId} generated ${a.generatedAccountId} type ${a.type} flags ${a.flags} activated ${a.activated}`;
+    b.appendChild(title);
+    b.appendChild(document.createElement('br'));
+    b.appendChild(details);
+    b.onclick = () => { selected = a; $('accountId').value = defaultAccountId(a); update(); render(); };
+    root.appendChild(b);
+  });
+}
+async function api(path, opt){
+  const r = await fetch(path, opt);
+  const t = await r.text();
+  try { return JSON.parse(t); } catch(e) { return {success:r.ok, raw:t}; }
+}
+async function load(){
+  msg('Loading...');
+  const j = await api('/api/accounts');
+  accounts = j.accounts || [];
+  selected = null;
+  $('accountId').value = '';
+  render(); update(); msg('Ready');
+}
+$('refresh').onclick = load;
+$('diagnostics').onclick = async () => { $('result').textContent = JSON.stringify(await api('/api/diagnostics'), null, 2); };
+$('deepdiff').onclick = async () => { $('result').textContent = JSON.stringify(await api('/api/deepdiff?from=1&to=4&limit=256'), null, 2); };
+$('risk').onchange = update;
+$('accountId').oninput = update;
+$('activate').onclick = async () => {
+  if(!selected) return;
+  const body = {
+    slot: selected.slot,
+    accountId: normalizeId($('accountId').value),
+    expected: {name:selected.name, accountId:selected.accountId, type:selected.type, flags:selected.flags},
+    confirmation: {selectedName:selected.name, understandsRisk:true}
+  };
+  $('result').textContent = 'Activating...';
+  const j = await api('/api/activate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  $('result').textContent = JSON.stringify(j, null, 2);
+  await load();
+};
+$('install').onclick = async () => { $('result').textContent = JSON.stringify(await api('/api/launcher/install', {method:'POST'}), null, 2); };
+$('open').onclick = async () => { $('result').textContent = JSON.stringify(await api('/api/browser/open', {method:'POST'}), null, 2); };
+$('shutdown').onclick = async () => { $('result').textContent = JSON.stringify(await api('/api/shutdown', {method:'POST'}), null, 2); };
+load();
+</script></body></html>
